@@ -38,11 +38,11 @@ heartbeat: $(OBJS) $(USER_OBJS)
 
 # Other Targets
 clean:
-	-$(RM) $(OBJS)$(C_DEPS)$(EXECUTABLES) heartbeat
+	-$(RM) $(EXECUTABLES)$(OBJS)$(C_DEPS) heartbeat
 	-@echo ' '
 
 pre-build:
-	-./createbuilddate.sh
+	-./createbuilddate.sh "../include/hbdate.txt" "const char hbDate[]" "BuildDate"
 	-@echo ' '
 
 .PHONY: all clean dependents
