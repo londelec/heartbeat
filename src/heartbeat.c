@@ -2,11 +2,14 @@
  ============================================================================
  Name        : heartbeat.c
  Author      : AK
- Version     : V1.01
+ Version     : V1.02
  Copyright   : Property of Londelec UK Ltd
  Description : iMX287 heartbeat agent
 
   Change log :
+
+  *********V1.02 26/12/2022**************
+  Compatible with leiodc lib V2.0
 
   *********V1.01 30/03/2018**************
   Term signal handler added
@@ -39,7 +42,7 @@
 #include "../../libleiodc/include/libleiodchw.h"
 
 
-static const lechar FirmwareVersion[] = " HeartbeatVersion=1.01 ";
+static const lechar FirmwareVersion[] = " HeartbeatVersion=1.02 ";
 #include "hbdate.txt"
 
 
@@ -54,24 +57,25 @@ static const lechar FirmwareVersion[] = " HeartbeatVersion=1.01 ";
 #define LOGLEN_ARGBUF		512					// Argument buffer string length
 
 
-#define	LIBLEIODC_MIN_VER	100					// Minimal required libleiodc version
+#define	LIBLEIODC_MIN_VER	200					// Minimal required libleiodc version
 
 #define	LED_ON_NSEC			50000000			// LED on period in nanoseconds (0.05sec)
 #define	LED_OFF_SEC			1					// LED off period in seconds (1sec)
 
 
-// Global variables
-static lesigaction sa_term;					// Signal action for Termination (kill) and Ctrl + C
+static sigaction_t sa_term;					// Signal action for Termination (kill) and Ctrl + C
 
 
-// Command line argument specification
+/*
+ * Command line arguments
+ */
 typedef enum {
-	arghelp						= 1,
+	arghelp = 1,
 	argVersion,
-} LEOPACK ArgEnum;
+} ArgEnum;
 
 
-static const struct ArgumentTable_s {
+static const struct {
 	const lechar			*string;
 	ArgEnum					entry;
 } ArgTable[] =
@@ -93,17 +97,18 @@ static const lechar consHelpConst[] = "iMX287 heartbeat agent\n\n"
 		"   ?  --help\t\tdisplay help and exit\n";
 
 
-// Macros
-// For expanding system logger
+/*
+ * Error logger macros
+ */
 #define SYSLOG_CONSOLE(...) syslogger(1, __func__, __FILE__, __LINE__, __VA_ARGS__);
 
 
 
 
-/***************************************************************************
-* Formated logger for system debug information
-* [30/03/2018]
-***************************************************************************/
+/*
+ * Formated logger for system debug information
+ * [30/03/2018]
+ */
 static void syslogger(int llevel, const lechar *cfunc, const lechar *cfile, int lineno, const lechar *format, ...) {
 	lechar 			argbuf[LOGLEN_ARGBUF];
 	lechar 			outstring[LOGLEN_FULL];
@@ -134,10 +139,10 @@ static void syslogger(int llevel, const lechar *cfunc, const lechar *cfile, int 
 }
 
 
-/***************************************************************************
-* Termination signal handler
-* [30/03/2018]
-***************************************************************************/
+/*
+ * Termination signal handler
+ * [30/03/2018]
+ */
 static void term_signal(int signalnum, siginfo_t *info, void *ptr) {
 
 	switch (signalnum) {
@@ -169,81 +174,17 @@ static void term_signal(int signalnum, siginfo_t *info, void *ptr) {
 }
 
 
-/***************************************************************************
-* Read and process command line arguments
-* [04/03/2015]
-***************************************************************************/
-int main(int argc, char *argv[]) {
-	uint8_t		cnt, argcnt;
+/*
+ * Main loop
+ * [11/03/2015]
+ * Loop moved to a separate function
+ * [26/12/2022]
+ */
+static void mainloop(void) {
+	nanotime_t		definedtimeout;
 
 
-	for (argcnt = 1; argcnt < argc; argcnt++) {
-		for (cnt = 0; cnt < (ARRAY_SIZE(ArgTable)); cnt++) {
-			if (strcasecmp(ArgTable[cnt].string, argv[argcnt]) == 0) {
-				switch (ArgTable[cnt].entry) {
-				case argVersion:
-					SYSLOG_CONSOLE(FirmwareVersion)
-					SYSLOG_CONSOLE(hbDate);
-					exit(EXIT_SUCCESS);
-					break;
-
-
-				case arghelp:
-					SYSLOG_CONSOLE(consHelpConst);
-					exit(EXIT_SUCCESS);
-					break;
-
-				default:
-					// Don't parse unknown arguments
-					break;
-				}
-				break;
-			}
-		}
-	}
-
-
-/***************************************************************************
-* Install Signal handlers for Termination
-* [30/03/2018]
-***************************************************************************/
-	memset(&sa_term, 0, sizeof(sa_term));
-	sa_term.sa_sigaction = term_signal;			// Handler function
-	sa_term.sa_flags = SA_SIGINFO;
-	sigaction(SIGINT, &sa_term, NULL);			// Ctrl + C action handler
-	sigaction(SIGTERM, &sa_term, NULL);			// Terminate (kill) action handler
-
-
-/***************************************************************************
-* Initialize gpio files and states
-* [11/03/2015]
-***************************************************************************/
-	if (leiodc_libverchk(LIBLEIODC_MIN_VER) == EXIT_FAILURE) {
-		SYSLOG_CONSOLE(LibErrorString);
-		exit(EXIT_FAILURE);
-	}
-
-
-	if (leiodc_pininit(NULL, lepin_count) == EXIT_FAILURE) {
-		SYSLOG_CONSOLE(LibErrorString);
-		exit(EXIT_FAILURE);
-	}
-
-
-	if (leiodc_pinoutstate(lepin_heartbeat, 1) == EXIT_FAILURE) {
-		SYSLOG_CONSOLE(LibErrorString);
-		return EXIT_FAILURE;
-	}
-
-
-/***************************************************************************
-* Main loop
-* [11/03/2015]
-***************************************************************************/
 	while(1) {
-		nanotimedef		definedtimeout;
-
-
 #ifdef DEBUG_DRYRUN
 		//SYSLOG_CONSOLE("HB LED on");
 #else
@@ -272,7 +213,78 @@ int main(int argc, char *argv[]) {
 		definedtimeout.tv_sec = LED_OFF_SEC;
 		definedtimeout.tv_nsec = 0;
 		clock_nanosleep(CLOCK_MONOTONIC, 0, &definedtimeout, NULL);
+	}
+}
 
-	}	// Close main loop
+
+/*
+ * Read and process command line arguments
+ * [04/03/2015]
+ * Loop moved to a separate function
+ * [26/12/2022
+ */
+int main(int argc, char *argv[]) {
+	int		i, argcnt;
+
+
+	for (argcnt = 1; argcnt < argc; argcnt++) {
+		for (i = 0; i < (ARRAY_SIZE(ArgTable)); i++) {
+			if (strcasecmp(ArgTable[i].string, argv[argcnt]) == 0) {
+				switch (ArgTable[i].entry) {
+				case argVersion:
+					SYSLOG_CONSOLE(FirmwareVersion)
+					SYSLOG_CONSOLE(hbDate);
+					exit(EXIT_SUCCESS);
+					break;
+
+
+				case arghelp:
+					SYSLOG_CONSOLE(consHelpConst);
+					exit(EXIT_SUCCESS);
+					break;
+
+				default:
+					// Don't parse unknown arguments
+					break;
+				}
+				break;
+			}
+		}
+	}
+
+
+	/*
+	 * Install Signal handlers for Termination
+	 */
+	memset(&sa_term, 0, sizeof(sa_term));
+	sa_term.sa_sigaction = term_signal;			// Handler function
+	sa_term.sa_flags = SA_SIGINFO;
+	sigaction(SIGINT, &sa_term, NULL);			// Ctrl + C action handler
+	sigaction(SIGTERM, &sa_term, NULL);			// Terminate (kill) action handler
+
+
+	/*
+	 * Initialize gpio files and states
+	 */
+	if (leiodc_libverchk(LIBLEIODC_MIN_VER) == EXIT_FAILURE) {
+		SYSLOG_CONSOLE(LibErrorString);
+		exit(EXIT_FAILURE);
+	}
+
+
+	const leiodcpin pintable[] = {lepin_heartbeat};
+
+	if (leiodc_pininit(pintable, ARRAY_SIZE(pintable)) == EXIT_FAILURE) {
+		SYSLOG_CONSOLE(LibErrorString);
+		exit(EXIT_FAILURE);
+	}
+
+
+	if (leiodc_pinoutstate(lepin_heartbeat, 1) == EXIT_FAILURE) {
+		SYSLOG_CONSOLE(LibErrorString);
+		return EXIT_FAILURE;
+	}
+
+	mainloop();
 	exit(EXIT_SUCCESS);
 }
